@@ -2,12 +2,21 @@ name: Playwright Tests
 on:
   workflow_dispatch:
   schedule:
-    - cron: "01,31 * * * *"
+    - cron: "0 * * * *" # Run every hour
 jobs:
   test:
     timeout-minutes: 10
     runs-on: ubuntu-22.04
     steps:
+    - name: Random delay check
+      run: |
+        # Generate a random number between 1 and 6
+        RANDOM_HOUR=$((1 + $RANDOM % 6))
+        # Skip execution if random number is greater than 1 (adjusts probability)
+        if [ $RANDOM_HOUR -gt 1 ]; then
+          echo "Skipping this run to achieve random interval between 1-6 hours"
+          exit 0
+        fi
     - uses: actions/checkout@v4
     - uses: actions/cache@v4
       with:

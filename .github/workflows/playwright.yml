@@ -2,7 +2,10 @@ name: Playwright Tests
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/15 * * * *" # Check every 15 minutes
+    - cron: "*/15 * * * *" # Check every 15 minutes to balance precision and resource usage
+concurrency:
+  group: playwright-tests
+  cancel-in-progress: true
 jobs:
   test:
     timeout-minutes: 10
@@ -12,11 +15,17 @@ jobs:
       run: |
         CURRENT_TIME=$(date +%s)
         NEXT_RUN_TIME=${{ vars.NEXT_RUN_TIME }}
-        if [ -z "$NEXT_RUN_TIME" ] || [ $CURRENT_TIME -ge $NEXT_RUN_TIME ]; then
+        # Validate NEXT_RUN_TIME is numeric and not empty
+        if [[ ! "$NEXT_RUN_TIME" =~ ^[0-9]+$ ]]; then
+          echo "NEXT_RUN_TIME is invalid or unset, allowing run to proceed"
+          NEXT_RUN_TIME=0
+        fi
+        echo "Current time: $CURRENT_TIME, Next run time: $NEXT_RUN_TIME"
+        if [ $CURRENT_TIME -ge $NEXT_RUN_TIME ]; then
           echo "TIME_TO_RUN=true" >> $GITHUB_ENV
         else
           echo "TIME_TO_RUN=false" >> $GITHUB_ENV
-          echo "Not time yet, skipping"
+          echo "Not time yet, skipping. Next run at $(date -d @$NEXT_RUN_TIME)"
           exit 0
         fi
     - uses: actions/checkout@v4
@@ -50,22 +59,54 @@ jobs:
     - name: Run Playwright tests
       if: ${{ env.TIME_TO_RUN == 'true' }}
       run: npx playwright test
-    - name: Update next run time
-      if: ${{ env.TIME_TO_RUN == 'true' }}
+    - name: Clean up .env file
+      if: ${{ env.TIME_TO_RUN == 'true' && always() }}
       run: |
+        if [ -f .env ]; then
+          rm -f .env
+          echo "Cleaned up .env file"
+        fi
+    - name: Update next run time
+      if: ${{ env.TIME_TO_RUN == 'true' && success() }}
+      run: |
+        if [ -z "${{ secrets.GITHUB_TOKEN }}" ]; then
+          echo "Error: GITHUB_TOKEN is not set. Please ensure workflow permissions allow access."
+          exit 1
+        fi
         CURRENT_TIME=$(date +%s)
         RANDOM_HOURS=$((1 + RANDOM % 6))
         NEXT_TIME=$((CURRENT_TIME + RANDOM_HOURS * 3600))
-        curl -L \
-          -X PATCH \
-          -H "Accept: application/vnd.github+json" \
-          -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
-          -H "X-GitHub-Api-Version: 2022-11-28" \
-          https://api.github.com/repos/${{ github.repository }}/actions/variables/NEXT_RUN_TIME \
-          -d "{\"name\":\"NEXT_RUN_TIME\",\"value\":\"$NEXT_TIME\"}"
-    # - uses: actions/upload-artifact@v4
-    #   if: always()
-    #   with:
-    #     name: playwright-report
-    #     path: playwright-report/
-    #     retention-days: 1
+        echo "Scheduling next run in $RANDOM_HOURS hours at $(date -d @$NEXT_TIME)"
+        for i in {1..3}; do
+          RESPONSE=$(curl -s -w "%{http_code}" -L \
+            -X PATCH \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/ShadowsTT/Airline-Manager-4-Bots/actions/variables/NEXT_RUN_TIME \
+            -d "{\"name\":\"NEXT_RUN_TIME\",\"value\":\"$NEXT_TIME\"}")
+          HTTP_STATUS=${RESPONSE: -3}
+          RESPONSE_BODY=${RESPONSE%???}
+          if [ "$HTTP_STATUS" -eq 204 ]; then
+            echo "Successfully updated NEXT_RUN_TIME to $NEXT_TIME"
+            break
+          else
+            echo "API call failed with status $HTTP_STATUS, attempt $i/3"
+            echo "Response: $RESPONSE_BODY"
+            if [ "$HTTP_STATUS" -eq 403 ]; then
+              echo "403 Forbidden: Check that 'Read and write permissions' are enabled in Settings > Actions > General > Workflow permissions."
+            fi
+            if [ $i -lt 3 ]; then
+              sleep 5
+            else
+              echo "Failed to update NEXT_RUN_TIME after 3 attempts"
+              exit 1
+            fi
+          fi
+        done
+    - uses: actions/upload-artifact@v4
+      if: ${{ env.TIME_TO_RUN == 'true' && always() }}
+      with:
+        name: playwright-report
+        path: playwright-report/
+        retention-days: 1

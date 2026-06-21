@@ -8,8 +8,18 @@ export class GeneralUtils {
     page : Page;
 
     constructor(page : Page) {
-        this.username = process.env.EMAIL!;
-        this.password = process.env.PASSWORD!;
+        const email = process.env.EMAIL;
+        const password = process.env.PASSWORD;
+
+        if (!email) {
+            throw new Error('EMAIL environment variable is required');
+        }
+        if (!password) {
+            throw new Error('PASSWORD environment variable is required');
+        }
+
+        this.username = email;
+        this.password = password;
         this.page = page;
     }
 
@@ -17,20 +27,16 @@ export class GeneralUtils {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
-    public async login(page: Page) {
-        console.log('Logging in...')
+    public async login(): Promise<void> {
+        await this.page.goto('https://www.airlinemanager.com/');
 
-        await page.goto('https://www.airlinemanager.com/');
-
-        await page.getByRole('button', { name: 'PLAY FREE NOW' }).click();
-        await page.getByRole('button', { name: 'Log in' }).click();
-        await page.locator('#lEmail').click();
-        await page.locator('#lEmail').fill(this.username);
-        await page.locator('#lEmail').press('Tab');
-        await page.locator('#lPass').click();
-        await page.locator('#lPass').fill(this.password);
-        await page.getByRole('button', { name: 'Log In', exact: true }).click();
-
-        console.log('Logged in successfully!');
+        await this.page.getByRole('button', { name: 'PLAY FREE NOW' }).click();
+        await this.page.getByRole('button', { name: 'Log in' }).click();
+        await this.page.locator('#lEmail').click();
+        await this.page.locator('#lEmail').fill(this.username);
+        await this.page.locator('#lEmail').press('Tab');
+        await this.page.locator('#lPass').click();
+        await this.page.locator('#lPass').fill(this.password);
+        await this.page.getByRole('button', { name: 'Log In', exact: true }).click();
     }
 }

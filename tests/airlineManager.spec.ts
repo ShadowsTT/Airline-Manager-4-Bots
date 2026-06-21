@@ -19,7 +19,7 @@ test('All Operations', async ({ page }) => {
   // End //
 
   // Login //
-  await generalUtils.login(page);
+  await generalUtils.login();
 
   // Fuel Operations //
   await page.locator('#mapMaint > img').first().click();

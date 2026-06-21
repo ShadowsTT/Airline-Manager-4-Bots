@@ -15,7 +15,9 @@ jobs:
       run: |
         CURRENT_TIME=$(date +%s)
         NEXT_RUN_TIME=${{ vars.NEXT_RUN_TIME }}
-        # Validate NEXT_RUN_TIME is numeric and not empty
+        # Default to 0 when the variable expands to an empty string, then validate
+        # it is numeric so the arithmetic comparison below cannot error out.
+        NEXT_RUN_TIME=${NEXT_RUN_TIME:-0}
         if [[ ! "$NEXT_RUN_TIME" =~ ^[0-9]+$ ]]; then
           echo "NEXT_RUN_TIME is invalid or unset, allowing run to proceed"
           NEXT_RUN_TIME=0
@@ -68,6 +70,9 @@ jobs:
         fi
     - name: Update next run time
       if: ${{ env.TIME_TO_RUN == 'true' && success() }}
+      # Don't let a transient GitHub API failure fail the whole job and
+      # permanently block future scheduled runs; surface it as a warning instead.
+      continue-on-error: true
       run: |
         if [ -z "${{ secrets.MY_GITHUB_TOKEN }}" ]; then
           echo "Error: MY_GITHUB_TOKEN is not set. Please ensure the PAT secret is configured in repository settings."
@@ -84,7 +89,7 @@ jobs:
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.MY_GITHUB_TOKEN }}" \
             -H "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/ShadowsTT/Airline-Manager-4-Bots/actions/variables/NEXT_RUN_TIME \
+            https://api.github.com/repos/${{ github.repository }}/actions/variables/NEXT_RUN_TIME \
             -d "{\"name\":\"NEXT_RUN_TIME\",\"value\":\"$NEXT_TIME\"}")
           HTTP_STATUS=${RESPONSE: -3}
           RESPONSE_BODY=${RESPONSE%???}
@@ -95,7 +100,7 @@ jobs:
             echo "API call failed with status $HTTP_STATUS, attempt $i/3"
             echo "Response: $RESPONSE_BODY"
             if [ "$HTTP_STATUS" -eq 403 ]; then
-              echo "403 Forbidden: Check that the PAT has 'Read and write' permissions for Actions and access to ShadowsTT/Airline-Manager-4-Bots."
+              echo "403 Forbidden: Check that the PAT has 'Read and write' permissions for Actions and access to ${{ github.repository }}."
             fi
             if [ $i -lt 3 ]; then
               sleep 5

@@ -25,14 +25,14 @@ test('All Operations', async ({ page }) => {
   await GeneralUtils.sleep(1000);
   await fuelUtils.buyCo2();
 
-  await page.locator('#popup > .modal-dialog > .modal-content > .modal-header > div > .glyphicons').click();
+  await generalUtils.closePopup();
   // End //
 
   // Campaign Operations //
   await page.locator('div:nth-child(5) > #mapMaint > img').click();
   await campaignUtils.createCampaign();
 
-  await page.locator('#popup > .modal-dialog > .modal-content > .modal-header > div > .glyphicons').click();
+  await generalUtils.closePopup();
   await GeneralUtils.sleep(1000)
   // End //
 
@@ -44,7 +44,7 @@ test('All Operations', async ({ page }) => {
   await maintenanceUtils.repairPlanes();
   await GeneralUtils.sleep(1000);
 
-  await page.locator('#popup > .modal-dialog > .modal-content > .modal-header > div > .glyphicons').click();
+  await generalUtils.closePopup();
   // End //
 
   // Depart Planes Operations //

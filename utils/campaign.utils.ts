@@ -2,11 +2,11 @@ import { Page } from "@playwright/test";
 import { GeneralUtils } from "./general.utils";
 
 export class CampaignUtils {
-    page: Page;
+    private readonly page: Page;
 
-    increaseAirlineReputation: boolean = false;
-    campaignType: number = 1;
-    campaignDuration: number = 4;
+    private increaseAirlineReputation: boolean = false;
+    private campaignType: number = 1;
+    private campaignDuration: number = 4;
 
     constructor(page: Page) {
         if(process.env.INCREASE_AIRLINE_REPUTATION === 'true') {

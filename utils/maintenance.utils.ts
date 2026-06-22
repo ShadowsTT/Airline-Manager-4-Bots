@@ -4,7 +4,7 @@ import { GeneralUtils } from "./general.utils";
 export class MaintenanceUtils {
     private static readonly REPAIR_PCT_THRESHOLD = 60;
 
-    page : Page;
+    private readonly page: Page;
 
     constructor(page : Page) {
         this.page = page;

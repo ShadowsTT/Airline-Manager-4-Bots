@@ -3,9 +3,13 @@ import { Page } from "@playwright/test";
 require('dotenv').config();
 
 export class GeneralUtils {
-    username : string;
-    password : string;
-    page : Page;
+    /** Close button shared by every in-game modal popup. */
+    private static readonly POPUP_CLOSE_SELECTOR =
+        '#popup > .modal-dialog > .modal-content > .modal-header > div > .glyphicons';
+
+    private readonly username: string;
+    private readonly password: string;
+    private readonly page: Page;
 
     constructor(page : Page) {
         const email = process.env.EMAIL;
@@ -23,8 +27,13 @@ export class GeneralUtils {
         this.page = page;
     }
 
-    public static async sleep(ms: number) {
+    public static async sleep(ms: number): Promise<void> {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    /** Closes the currently open modal popup via its shared close button. */
+    public async closePopup(): Promise<void> {
+        await this.page.locator(GeneralUtils.POPUP_CLOSE_SELECTOR).click();
     }
 
     public async login(): Promise<void> {

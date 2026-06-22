@@ -8,7 +8,7 @@ require('dotenv').config();
 const MAX_DEPART_ATTEMPTS = 8;
 
 export class FleetUtils {
-    page : Page;
+    private readonly page: Page;
 
     constructor(page : Page) {
         this.page = page;

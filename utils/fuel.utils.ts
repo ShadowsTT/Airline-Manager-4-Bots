@@ -2,126 +2,168 @@ import { Page } from "@playwright/test";
 
 require('dotenv').config();
 
+/**
+ * Automates buying Fuel and CO2 on the Airline Manager market page.
+ *
+ * Both commodities share the same purchase flow, so the buy logic lives in a
+ * single generic {@link FuelUtils.buyCommodity} method and the public
+ * {@link FuelUtils.buyFuel} / {@link FuelUtils.buyCo2} methods just supply the
+ * commodity-specific thresholds.
+ */
 export class FuelUtils {
-    maxFuelPrice : number;
-    maxCo2Price : number;
+    /** Buy this many litres of fuel in bulk when it is cheap but holdings are low. */
+    private static readonly FUEL_BULK_AMOUNT = 2_000_000;
+    /** Fuel is considered "cheap enough" to bulk-buy below this price. */
+    private static readonly FUEL_CHEAP_THRESHOLD = 1250;
+    /** Buy this much CO2 in bulk when it is cheap but holdings are low. */
+    private static readonly CO2_BULK_AMOUNT = 1_000_000;
+    /** CO2 is considered "cheap enough" to bulk-buy below this price. */
+    private static readonly CO2_CHEAP_THRESHOLD = 180;
 
-    page : Page;
+    private readonly maxFuelPrice: number;
+    private readonly maxCo2Price: number;
+    private readonly debugEnabled: boolean;
 
-    constructor(page : Page) {
-        this.maxFuelPrice = parseInt(process.env.MAX_FUEL_PRICE!);
-        this.maxCo2Price = parseInt(process.env.MAX_CO2_PRICE!);
+    private readonly page: Page;
+
+    constructor(page: Page) {
+        this.maxFuelPrice = FuelUtils.parsePrice('MAX_FUEL_PRICE', process.env.MAX_FUEL_PRICE);
+        this.maxCo2Price = FuelUtils.parsePrice('MAX_CO2_PRICE', process.env.MAX_CO2_PRICE);
+        this.debugEnabled = process.env.FUEL_UTILS_DEBUG === 'true';
         this.page = page;
 
-        console.log("Max Fuel Price: " + this.maxFuelPrice);
-        console.log("Max Co2 Price: " + this.maxCo2Price);
+        this.log("Max Fuel Price: " + this.maxFuelPrice);
+        this.log("Max Co2 Price: " + this.maxCo2Price);
     }
 
-    public async buyFuel() {
-        console.log('Buying Fuel...')
-
-        const getCurrentFuelPrice = async () => {
-            let fuelText = await this.page.getByText('Total price$').locator('b > span').innerText();
-            fuelText = fuelText.replaceAll(',', '');
-            
-            return parseInt(fuelText);
+    /**
+     * Validates that a required price env var is set and numeric.
+     * @throws Error with a descriptive message when missing or non-numeric.
+     */
+    private static parsePrice(name: string, raw: string | undefined): number {
+        if (raw === undefined || raw.trim() === '') {
+            throw new Error(`Environment variable ${name} is required but was not set.`);
         }
 
-        const getCurrentHolding = async () => {
-            let holdingText = await this.page.locator('#holding').innerText();
-            holdingText = holdingText.replaceAll(',', '');
-
-            return parseInt(holdingText);
+        const value = parseInt(raw, 10);
+        if (Number.isNaN(value)) {
+            throw new Error(`Environment variable ${name} must be a numeric value, but got "${raw}".`);
         }
 
-        const getEmptyFuel = async () => {
-            const emptyText = (await this.page.locator('#remCapacity').innerText()).replaceAll(',', '')
+        return value;
+    }
 
-            return parseInt(emptyText);
-        }
+    public async buyFuel(): Promise<void> {
+        await this.buyCommodity(
+            'Fuel',
+            ' Litres',
+            this.maxFuelPrice,
+            FuelUtils.FUEL_BULK_AMOUNT,
+            FuelUtils.FUEL_CHEAP_THRESHOLD,
+            FuelUtils.FUEL_BULK_AMOUNT,
+        );
+    }
 
-        const emptyFuel = await getEmptyFuel();
-        if(emptyFuel === 0) {
+    public async buyCo2(): Promise<void> {
+        await this.buyCommodity(
+            'Co2',
+            '',
+            this.maxCo2Price,
+            FuelUtils.CO2_BULK_AMOUNT,
+            FuelUtils.CO2_CHEAP_THRESHOLD,
+            FuelUtils.CO2_BULK_AMOUNT,
+        );
+    }
+
+    /**
+     * Generic buy routine shared by fuel and CO2.
+     *
+     * Buying behaviour (unchanged from the original per-commodity methods):
+     *  - Skip entirely when there is no empty capacity to fill.
+     *  - If the current price is below {@link maxPrice}, fill the remaining capacity.
+     *  - Otherwise, if holdings are below {@link minHoldingThreshold} and the price is
+     *    below {@link minHoldingPrice}, buy a fixed {@link bulkAmount}.
+     *
+     * @param label              Display name used in log messages (e.g. "Fuel").
+     * @param unit               Unit suffix appended to "amount bought" logs (e.g. " Litres").
+     * @param maxPrice           Buy all remaining capacity below this price.
+     * @param minHoldingThreshold Only bulk-buy while current holdings are below this.
+     * @param minHoldingPrice    Only bulk-buy while the price is below this.
+     * @param bulkAmount         Fixed amount to buy on the bulk branch.
+     */
+    private async buyCommodity(
+        label: string,
+        unit: string,
+        maxPrice: number,
+        minHoldingThreshold: number,
+        minHoldingPrice: number,
+        bulkAmount: number,
+    ): Promise<void> {
+        this.log(`Buying ${label}...`);
+
+        const emptyCapacity = await this.getEmptyCapacity();
+        if (emptyCapacity === 0) {
             return;
         }
 
-        const curFuelPrice = await getCurrentFuelPrice();
-        const curHolding = await getCurrentHolding();
+        const currentPrice = await this.getCurrentPrice();
+        const currentHolding = await this.getCurrentHolding();
 
-        console.log('Current Fuel Price: ' + curFuelPrice);
+        this.log(`Current ${label} Price: ${currentPrice}`);
 
-        // Buy fuel if current price is lower than max price
-        if(curFuelPrice < this.maxFuelPrice) {
-            const emptyFuelCapacity = (await this.page.locator('#remCapacity').innerText()).replaceAll(',', '');
+        // Buy all remaining capacity while the price is below the max price.
+        if (currentPrice < maxPrice) {
+            const capacityText = await this.getEmptyCapacityText();
+            await this.purchase(capacityText);
 
-            await this.page.getByPlaceholder('Amount to purchase').click();
-            await this.page.getByPlaceholder('Amount to purchase').press('Control+a');
-            await this.page.getByPlaceholder('Amount to purchase').fill(emptyFuelCapacity);
-            await this.page.getByRole('button', { name: ' Purchase' }).click();
-
-            console.log('Bought Fuel Successfully! Amount of fuel bought: ' + emptyFuelCapacity + ' Litres');
+            this.log(`Bought ${label} Successfully! Amount of ${label.toLowerCase()} bought: ${capacityText}${unit}`);
         }
-        else if(curHolding < 2000000 && curFuelPrice < 1250) {
-            const emptyFuelCapacity = (await this.page.locator('#remCapacity').innerText()).replaceAll(',', '');
+        // Otherwise top up in bulk while holdings are low and the price is still cheap.
+        else if (currentHolding < minHoldingThreshold && currentPrice < minHoldingPrice) {
+            await this.purchase(String(bulkAmount));
 
-            await this.page.getByPlaceholder('Amount to purchase').click();
-            await this.page.getByPlaceholder('Amount to purchase').press('Control+a');
-            await this.page.getByPlaceholder('Amount to purchase').fill('2000000');
-            await this.page.getByRole('button', { name: ' Purchase' }).click();
-
-            console.log('Bought Fuel Successfully! Amount of fuel bought: 2000000 Litres');
-        } 
+            this.log(`Bought ${label} Successfully! Amount of ${label.toLowerCase()} bought: ${bulkAmount}${unit}`);
+        }
     }
 
-    public async buyCo2() {
-        const getCurrentCo2Price = async () => {
-            let co2Text = await this.page.getByText('Total price$').locator('b > span').innerText();
-            co2Text = co2Text.replaceAll(',', '');
-            
-            return parseInt(co2Text);
-        }
+    /** Reads the live "Total price" shown for the pending purchase. */
+    private async getCurrentPrice(): Promise<number> {
+        const priceText = (await this.page.getByText('Total price$').locator('b > span').innerText()).replaceAll(',', '');
 
-        const getCurrentHolding = async () => {
-            let holdingText = await this.page.locator('#holding').innerText();
-            holdingText = holdingText.replaceAll(',', '');
+        return parseInt(priceText, 10);
+    }
 
-            return parseInt(holdingText);
-        }
+    /** Reads the amount of the commodity currently held. */
+    private async getCurrentHolding(): Promise<number> {
+        const holdingText = (await this.page.locator('#holding').innerText()).replaceAll(',', '');
 
-        const getEmptyCO2 = async () => {
-            const emptyText = (await this.page.locator('#remCapacity').innerText()).replaceAll(',', '')
+        return parseInt(holdingText, 10);
+    }
 
-            return parseInt(emptyText);
-        }
+    /** Remaining (empty) capacity as the raw, comma-stripped page text. */
+    private async getEmptyCapacityText(): Promise<string> {
+        return (await this.page.locator('#remCapacity').innerText()).replaceAll(',', '');
+    }
 
-        const emptyCo2 = await getEmptyCO2();
-        if(emptyCo2 === 0) {
-            return;
-        }
+    /** Remaining (empty) capacity parsed to a number. */
+    private async getEmptyCapacity(): Promise<number> {
+        return parseInt(await this.getEmptyCapacityText(), 10);
+    }
 
-        const curCo2Price = await getCurrentCo2Price();
-        const curHolding = await getCurrentHolding();
+    /** Fills the purchase amount field and clicks the Purchase button. */
+    private async purchase(amount: string): Promise<void> {
+        const amountInput = this.page.getByPlaceholder('Amount to purchase');
 
-        console.log('Current Co2 Price: ' + curCo2Price);
+        await amountInput.click();
+        await amountInput.press('Control+a');
+        await amountInput.fill(amount);
+        await this.page.getByRole('button', { name: ' Purchase' }).click();
+    }
 
-        // Buy co2 if current price is lower than max price
-        if(curCo2Price < this.maxCo2Price) {
-            const emptyCo2Capacity = (await this.page.locator('#remCapacity').innerText()).replaceAll(',', '');
-
-            await this.page.getByPlaceholder('Amount to purchase').click();
-            await this.page.getByPlaceholder('Amount to purchase').press('Control+a');
-            await this.page.getByPlaceholder('Amount to purchase').fill(emptyCo2Capacity);
-            await this.page.getByRole('button', { name: ' Purchase' }).click();
-
-            console.log('Bought Co2 Successfully! Amount of co2 bought: ' + emptyCo2Capacity);
-        }
-        else if(curHolding < 1000000 && curCo2Price < 180) {
-            await this.page.getByPlaceholder('Amount to purchase').click();
-            await this.page.getByPlaceholder('Amount to purchase').press('Control+a');
-            await this.page.getByPlaceholder('Amount to purchase').fill('1000000');
-            await this.page.getByRole('button', { name: ' Purchase' }).click();
-
-            console.log('Bought Co2 Successfully! Amount of co2 bought: 1000000');
+    /** Minimal, toggleable logging. Enable by setting FUEL_UTILS_DEBUG=true. */
+    private log(message: string): void {
+        if (this.debugEnabled) {
+            console.log(message);
         }
     }
 }

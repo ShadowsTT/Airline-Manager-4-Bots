@@ -3,36 +3,32 @@ import { GeneralUtils } from "./general.utils";
 
 require('dotenv').config();
 
+// Caps the depart loop so it cannot spin forever when no fuel is available;
+// each iteration departs up to 20 planes, so 8 attempts covers a full fleet.
+const MAX_DEPART_ATTEMPTS = 8;
+
 export class FleetUtils {
     page : Page;
-    maxTry : number; // Added to prevent infinite loop in case of no fuel available
 
     constructor(page : Page) {
         this.page = page;
-        this.maxTry = 8; // TODO: Find another way 
     }
 
-    public async departPlanes() {
-        let departAllVisible = await this.page.locator('#departAll').isVisible();
-        console.log('Looking if there are any planes to be departed...')
+    public async departPlanes(): Promise<void> {
+        const departAll = this.page.locator('#departAll');
+        let departAllVisible = await departAll.isVisible();
 
-        let count = 0; 
-        while(departAllVisible && count < this.maxTry) {
-            console.log('Departing 20 or less...');
-
-            let departAll = await this.page.locator('#departAll');
-            
+        let count = 0;
+        while (departAllVisible && count < MAX_DEPART_ATTEMPTS) {
             await departAll.click();
             await GeneralUtils.sleep(1500);
-            
+
             const cantDepartPlane = await this.page.getByText('×Unable to departSome A/C was').isVisible();
-            if(cantDepartPlane)
+            if (cantDepartPlane)
                 break;
 
-            departAllVisible = await this.page.locator('#departAll').isVisible();
+            departAllVisible = await departAll.isVisible();
             count++;
-        
-            console.log('Departed 20 or less planes...')
         }
     }
 }

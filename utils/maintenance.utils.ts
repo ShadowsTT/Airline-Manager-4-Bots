@@ -34,14 +34,16 @@ export class MaintenanceUtils {
         // Click only planes with danger text
         const dangerChecksExits = await this.page.locator('.bg-white > .text-danger').first().isVisible();
         if(dangerChecksExits) {
-            // Collect all matching elements up front. Playwright locators are live, so
-            // calling first() each iteration after a click can shift DOM positions and
-            // cause elements to be skipped or double-clicked. all() snapshots the list.
-            const allCheckHoursDanger = await this.page.locator('.bg-white > .text-danger').all();
-            for(const element of allCheckHoursDanger) {
-                await element.click();
+            // Clicking a danger row removes it from the matched set, so the list
+            // shrinks as we go. Snapshotting with all() and indexing nth() breaks:
+            // after a few clicks the higher indices are detached and the click
+            // hangs for the full test timeout. Count once, then always click the
+            // current first() — the next danger row falls into first() each pass.
+            const dangerCheck = this.page.locator('.bg-white > .text-danger');
+            const count = await dangerCheck.count();
+            for(let i = 0; i < count; i++) {
+                await dangerCheck.first().click();
                 clicked = true;
-
                 await GeneralUtils.sleep(500);
             }
         }
